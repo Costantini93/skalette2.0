@@ -337,6 +337,7 @@ END:VCALENDAR`
   const toggleBlock = async (date: string, time: string, tableId: string) => {
     const blocked = isBlocked(date, time, tableId)
     
+    // Aggiorna localmente prima
     let newSlots
     if (blocked) {
       // Sblocca
@@ -351,17 +352,27 @@ END:VCALENDAR`
     const newData = { blockedSlots: newSlots }
     setAvailabilityData(newData)
 
-    // Salva
+    // Salva solo questo slot specifico sul database
     try {
       await fetch('/api/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newData)
+        body: JSON.stringify({
+          action: blocked ? 'unblock' : 'block',
+          date,
+          time,
+          tableId
+        })
       })
       setSaveMessage('✓ Salvato')
       setTimeout(() => setSaveMessage(''), 2000)
+      
+      // Ricarica i dati dal server per assicurarsi di essere sincronizzati
+      loadAvailability()
     } catch (err) {
       setSaveMessage('✗ Errore salvataggio')
+      // Ripristina stato precedente in caso di errore
+      setAvailabilityData(availabilityData)
     }
   }
 

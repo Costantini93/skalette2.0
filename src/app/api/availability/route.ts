@@ -18,29 +18,34 @@ export async function GET() {
   }
 }
 
-// Salva disponibilità
+// Aggiungi o rimuovi singolo slot
 export async function POST(request: Request) {
   try {
     const body = await request.json()
     await initDatabase()
     
-    // Prima cancella tutti gli slot bloccati
-    await sql`DELETE FROM blocked_slots`
+    const { action, date, time, tableId } = body
     
-    // Poi inserisci i nuovi
-    if (body.blockedSlots && body.blockedSlots.length > 0) {
-      for (const slot of body.blockedSlots) {
-        await sql`
-          INSERT INTO blocked_slots (date, time, table_id)
-          VALUES (${slot.date}, ${slot.time}, ${slot.tableId})
-          ON CONFLICT (date, time, table_id) DO NOTHING
-        `
-      }
+    if (action === 'block') {
+      // Aggiungi slot bloccato
+      await sql`
+        INSERT INTO blocked_slots (date, time, table_id)
+        VALUES (${date}, ${time}, ${tableId})
+        ON CONFLICT (date, time, table_id) DO NOTHING
+      `
+    } else if (action === 'unblock') {
+      // Rimuovi slot bloccato
+      await sql`
+        DELETE FROM blocked_slots
+        WHERE date = ${date}
+          AND time = ${time}
+          AND table_id = ${tableId}
+      `
     }
     
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Error saving availability:', error)
-    return NextResponse.json({ success: false, error: 'Failed to save data' }, { status: 500 })
+    console.error('Error updating availability:', error)
+    return NextResponse.json({ success: false, error: 'Failed to update data' }, { status: 500 })
   }
 }
