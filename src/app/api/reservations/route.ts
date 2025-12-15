@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
-import { sql } from '@vercel/postgres'
-import { initDatabase } from '@/lib/db'
+import { getDB, initDatabase } from '@/lib/db'
 
 interface BlockedSlot {
   date: string
@@ -42,25 +41,26 @@ function getDuration(serviceType: string): number {
 export async function GET() {
   try {
     await initDatabase()
-    const { rows } = await sql`
+    const db = getDB()
+    const result = await db.execute(`
       SELECT 
         id,
         date,
         time,
-        table_id as "tableId",
+        table_id as tableId,
         guests,
-        first_name as "firstName",
-        last_name as "lastName",
+        first_name as firstName,
+        last_name as lastName,
         phone,
-        service_type as "serviceType",
+        service_type as serviceType,
         duration,
         notes,
         status,
         timestamp
       FROM reservations
       ORDER BY date DESC, time DESC
-    `
-    return NextResponse.json({ reservations: rows })
+    `)
+    return NextResponse.json({ reservations: result.rows })
   } catch (error) {
     console.error('Error fetching reservations:', error)
     return NextResponse.json({ reservations: [] })
@@ -124,26 +124,27 @@ export async function POST(request: Request) {
     }
 
     await initDatabase()
+    const db = getDB()
 
     // Leggi prenotazioni esistenti
-    const { rows } = await sql`
+    const result = await db.execute(`
       SELECT 
         id,
         date,
         time,
-        table_id as "tableId",
+        table_id as tableId,
         guests,
-        first_name as "firstName",
-        last_name as "lastName",
+        first_name as firstName,
+        last_name as lastName,
         phone,
-        service_type as "serviceType",
+        service_type as serviceType,
         duration,
         notes,
         status,
         timestamp
       FROM reservations
-      WHERE date >= CURRENT_DATE
-    `
+      WHERE date >= date('now')
+    `)
 
     const duration = getDuration(body.serviceType)
 
@@ -152,7 +153,7 @@ export async function POST(request: Request) {
       body.date,
       body.time,
       duration,
-      rows,
+      result.rows as any[],
       body.tableId
     )
 
@@ -175,26 +176,27 @@ export async function POST(request: Request) {
     const reservationId = `RES-${Date.now()}`
     const timestamp = new Date().toISOString()
 
-    await sql`
-      INSERT INTO reservations (
+    await db.execute({
+      sql: `INSERT INTO reservations (
         id, date, time, table_id, guests, first_name, last_name, 
         phone, service_type, duration, notes, status, timestamp
-      ) VALUES (
-        ${reservationId},
-        ${body.date},
-        ${body.time},
-        ${body.tableId},
-        ${parseInt(body.guests)},
-        ${body.firstName},
-        ${body.lastName},
-        ${body.phone},
-        ${body.serviceType},
-        ${duration},
-        ${body.notes || ''},
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        reservationId,
+        body.date,
+        body.time,
+        body.tableId,
+        parseInt(body.guests),
+        body.firstName,
+        body.lastName,
+        body.phone,
+        body.serviceType,
+        duration,
+        body.notes || '',
         'pending',
-        ${timestamp}
-      )
-    `
+        timestamp
+      ]
+    })
 
     const newReservation = {
       id: reservationId,
@@ -232,32 +234,34 @@ export async function PUT(request: Request) {
     const { reservationId, status, action } = body
 
     await initDatabase()
+    const db = getDB()
 
     // Trova prenotazione
-    const { rows } = await sql`
-      SELECT 
+    const result = await db.execute({
+      sql: `SELECT 
         id,
         date,
         time,
-        table_id as "tableId",
+        table_id as tableId,
         guests,
-        first_name as "firstName",
-        last_name as "lastName",
+        first_name as firstName,
+        last_name as lastName,
         phone,
-        service_type as "serviceType",
+        service_type as serviceType,
         duration,
         notes,
         status,
         timestamp
       FROM reservations
-      WHERE id = ${reservationId}
-    `
+      WHERE id = ?`,
+      args: [reservationId]
+    })
 
-    if (rows.length === 0) {
+    if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Prenotazione non trovata' }, { status: 404 })
     }
 
-    const reservation = rows[0]
+    const reservation = result.rows[0] as any
     let newStatus = status || reservation.status
 
     // Se azione è "confirm", blocca anche il tavolo
@@ -276,11 +280,10 @@ export async function PUT(request: Request) {
         const slotMins = slotMinutes % 60
         const slotTime = `${String(slotHours).padStart(2, '0')}:${String(slotMins).padStart(2, '0')}`
         
-        await sql`
-          INSERT INTO blocked_slots (date, time, table_id)
-          VALUES (${reservation.date}, ${slotTime}, ${reservation.tableId})
-          ON CONFLICT (date, time, table_id) DO NOTHING
-        `
+        await db.execute({
+          sql: `INSERT OR IGNORE INTO blocked_slots (date, time, table_id) VALUES (?, ?, ?)`,
+          args: [reservation.date, slotTime, reservation.tableId]
+        })
       }
     }
 
@@ -300,21 +303,18 @@ export async function PUT(request: Request) {
         const slotMins = slotMinutes % 60
         const slotTime = `${String(slotHours).padStart(2, '0')}:${String(slotMins).padStart(2, '0')}`
         
-        await sql`
-          DELETE FROM blocked_slots
-          WHERE date = ${reservation.date}
-            AND time = ${slotTime}
-            AND table_id = ${reservation.tableId}
-        `
+        await db.execute({
+          sql: `DELETE FROM blocked_slots WHERE date = ? AND time = ? AND table_id = ?`,
+          args: [reservation.date, slotTime, reservation.tableId]
+        })
       }
     }
 
     // Aggiorna status prenotazione
-    await sql`
-      UPDATE reservations
-      SET status = ${newStatus}
-      WHERE id = ${reservationId}
-    `
+    await db.execute({
+      sql: `UPDATE reservations SET status = ? WHERE id = ?`,
+      args: [newStatus, reservationId]
+    })
 
     return NextResponse.json({ 
       success: true, 
