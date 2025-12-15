@@ -63,11 +63,92 @@ export default function ReservationAdvanced() {
   const [showSuccess, setShowSuccess] = useState(false)
   const [availableTables, setAvailableTables] = useState<Table[]>([])
   const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([])
+  const [availableTimeSlots, setAvailableTimeSlots] = useState<string[]>([])
+
+  // Genera slot orari dinamicamente in base alla data e tipo di servizio
+  const generateTimeSlots = (date: string, serviceType: string): string[] => {
+    if (!date) return []
+    
+    const selectedDate = new Date(date + 'T00:00:00')
+    const dayOfWeek = selectedDate.getDay() // 0 = Domenica, 1 = Lunedì, ..., 6 = Sabato
+    
+    const slots: string[] = []
+    
+    // Genera slot da 10:30
+    const startHour = 10
+    const startMinute = 30
+    
+    let endHour = 21
+    let endMinute = 30
+    
+    // Determina orario di fine in base al tipo di servizio e giorno della settimana
+    if (serviceType === 'cena') {
+      // Cene sempre fino alle 21:30
+      endHour = 21
+      endMinute = 30
+    } else if (serviceType === 'aperitivo') {
+      // Aperitivi - orari variabili per giorno
+      if (dayOfWeek >= 1 && dayOfWeek <= 4) {
+        // Lunedì-Giovedì: fino alle 23:30
+        endHour = 23
+        endMinute = 30
+      } else if (dayOfWeek === 5 || dayOfWeek === 6) {
+        // Venerdì-Sabato: fino alle 00:00
+        endHour = 24
+        endMinute = 0
+      } else if (dayOfWeek === 0) {
+        // Domenica: fino alle 22:30
+        endHour = 22
+        endMinute = 30
+      }
+    } else if (serviceType === 'pranzo') {
+      // Pranzi tipicamente fino alle 15:00
+      endHour = 15
+      endMinute = 0
+    } else {
+      // Default se non è selezionato un tipo di servizio
+      endHour = 23
+      endMinute = 30
+    }
+    
+    // Genera slot ogni 30 minuti
+    let currentHour = startHour
+    let currentMinute = startMinute
+    
+    while (
+      currentHour < endHour || 
+      (currentHour === endHour && currentMinute <= endMinute)
+    ) {
+      const timeString = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`
+      slots.push(timeString)
+      
+      currentMinute += 30
+      if (currentMinute >= 60) {
+        currentMinute = 0
+        currentHour += 1
+      }
+      
+      // Gestione per dopo mezzanotte (Venerdì-Sabato)
+      if (currentHour >= 24) {
+        break
+      }
+    }
+    
+    return slots
+  }
 
   // Carica disponibilità dal server
   useEffect(() => {
     loadAvailability()
   }, [])
+
+  // Imposta la data su oggi quando si passa allo step 2
+  useEffect(() => {
+    if (step === 2 && !formData.date) {
+      const today = new Date().toISOString().split('T')[0]
+      setFormData(prev => ({ ...prev, date: today }))
+    }
+  }, [step])
 
   const loadAvailability = async () => {
     try {
@@ -162,6 +243,23 @@ export default function ReservationAdvanced() {
       )
       
       setAvailableTables(filtered)
+    }
+
+    // Aggiorna gli slot orari se cambia la data
+    if (field === 'date' && value) {
+      const slots = generateTimeSlots(value, newFormData.serviceType)
+      setAvailableTimeSlots(slots)
+    }
+  }
+
+  // Gestisce il cambio del tipo di servizio
+  const handleServiceTypeChange = (serviceType: string) => {
+    setFormData({ ...formData, serviceType, time: '' })
+    
+    // Rigenera slot orari in base al nuovo tipo di servizio
+    if (formData.date) {
+      const slots = generateTimeSlots(formData.date, serviceType)
+      setAvailableTimeSlots(slots)
     }
   }
 
@@ -268,9 +366,9 @@ END:VCALENDAR`
       case 1:
         return formData.guests && parseInt(formData.guests) > 0 && parseInt(formData.guests) < 6
       case 2:
-        return formData.selectedTable && formData.date && formData.time
+        return formData.selectedTable && formData.date && formData.time && formData.serviceType
       case 3:
-        return formData.firstName && formData.lastName && formData.phone && formData.serviceType
+        return formData.firstName && formData.lastName && formData.phone
       default:
         return false
     }
@@ -443,7 +541,7 @@ END:VCALENDAR`
                 </motion.div>
               )}
 
-              {/* Step 2: Selezione Tavolo + Data/Ora */}
+              {/* Step 2: Data/Ora + Selezione Tavolo */}
               {step === 2 && (
                 <motion.div
                   initial={{ opacity: 0, x: 50 }}
@@ -451,6 +549,70 @@ END:VCALENDAR`
                   exit={{ opacity: 0, x: -50 }}
                   className="space-y-6"
                 >
+                  {/* Prima: Servizio, Data e Orario */}
+                  <div className="glass-effect p-8 rounded-2xl">
+                    <h3 className="text-2xl font-bold mb-6">Servizio, Data e Orario</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div>
+                        <label className="block text-white/80 mb-2 font-medium">
+                          <FiClock className="inline mr-2" />
+                          Tipo di Servizio
+                        </label>
+                        <select
+                          value={formData.serviceType}
+                          onChange={(e) => handleServiceTypeChange(e.target.value)}
+                          className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-xl focus:outline-none focus:border-primary-500 transition-colors"
+                          required
+                        >
+                          <option value="">Seleziona servizio</option>
+                          <option value="pranzo">Pranzo</option>
+                          <option value="aperitivo">Aperitivo</option>
+                          <option value="cena">Cena</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-white/80 mb-2 font-medium">
+                          <FiCalendar className="inline mr-2" />
+                          Data
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.date}
+                          onChange={(e) => handleDateTimeChange('date', e.target.value)}
+                          min={new Date().toISOString().split('T')[0]}
+                          className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-xl focus:outline-none focus:border-primary-500 transition-colors"
+                          required
+                          disabled={!formData.serviceType}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-white/80 mb-2 font-medium">
+                          <FiClock className="inline mr-2" />
+                          Orario
+                        </label>
+                        <select
+                          value={formData.time}
+                          onChange={(e) => handleDateTimeChange('time', e.target.value)}
+                          className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-xl focus:outline-none focus:border-primary-500 transition-colors"
+                          required
+                          disabled={!formData.date || !formData.serviceType}
+                        >
+                          <option value="">Seleziona orario</option>
+                          {availableTimeSlots.map(time => (
+                            <option key={time} value={time}>{time}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    {!formData.serviceType && (
+                      <p className="text-yellow-400 text-sm mt-2">⚠️ Seleziona il tipo di servizio per continuare</p>
+                    )}
+                    {formData.serviceType && !formData.date && (
+                      <p className="text-yellow-400 text-sm mt-2">⚠️ Seleziona la data per vedere gli orari disponibili</p>
+                    )}
+                  </div>
+
+                  {/* Poi: Selezione Tavolo */}
                   <div className="glass-effect p-8 rounded-2xl">
                     <h3 className="text-2xl font-bold mb-6">Scegli il Tuo Tavolo</h3>
                     
@@ -873,50 +1035,6 @@ END:VCALENDAR`
                     </div>
                   </div>
 
-                  <div className="glass-effect p-8 rounded-2xl">
-                    <h3 className="text-2xl font-bold mb-6">Data e Orario</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-white/80 mb-2 font-medium">
-                          <FiCalendar className="inline mr-2" />
-                          Data
-                        </label>
-                        <input
-                          type="date"
-                          value={formData.date}
-                          onChange={(e) => handleDateTimeChange('date', e.target.value)}
-                          min={new Date().toISOString().split('T')[0]}
-                          className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-xl focus:outline-none focus:border-primary-500 transition-colors"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-white/80 mb-2 font-medium">
-                          <FiClock className="inline mr-2" />
-                          Orario
-                        </label>
-                        <select
-                          value={formData.time}
-                          onChange={(e) => handleDateTimeChange('time', e.target.value)}
-                          className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-xl focus:outline-none focus:border-primary-500 transition-colors"
-                          required
-                        >
-                          <option value="">Seleziona orario</option>
-                          <option value="12:00">12:00</option>
-                          <option value="12:30">12:30</option>
-                          <option value="13:00">13:00</option>
-                          <option value="13:30">13:30</option>
-                          <option value="19:00">19:00</option>
-                          <option value="19:30">19:30</option>
-                          <option value="20:00">20:00</option>
-                          <option value="20:30">20:30</option>
-                          <option value="21:00">21:00</option>
-                          <option value="21:30">21:30</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
                   <div className="flex justify-between">
                     <MagneticButton
                       variant="outline"
@@ -995,26 +1113,6 @@ END:VCALENDAR`
                       className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-xl focus:outline-none focus:border-primary-500 transition-colors"
                       required
                     />
-                  </div>
-
-                  <div className="mb-6">
-                    <label className="block text-white/80 mb-2 font-medium">
-                      <FiClock className="inline mr-2" />
-                      Tipo di Servizio *
-                    </label>
-                    <select
-                      value={formData.serviceType}
-                      onChange={(e) =>
-                        setFormData({ ...formData, serviceType: e.target.value })
-                      }
-                      className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-xl focus:outline-none focus:border-primary-500 transition-colors"
-                      required
-                    >
-                      <option value="">Seleziona tipo di servizio</option>
-                      <option value="pranzo">Pranzo (2 ore)</option>
-                      <option value="aperitivo">Aperitivo (1.5 ore)</option>
-                      <option value="cena">Cena (2 ore)</option>
-                    </select>
                   </div>
 
                   <div className="mb-6">

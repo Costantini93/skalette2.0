@@ -26,7 +26,7 @@ interface Reservation {
   serviceType: 'pranzo' | 'aperitivo' | 'cena'
   duration: number
   notes?: string
-  status: 'pending' | 'confirmed' | 'rejected'
+  status: 'pending' | 'confirmed' | 'rejected' | 'cancelled'
   timestamp: string
 }
 
@@ -35,8 +35,9 @@ const tables = [
 ]
 
 const timeSlots = [
-  '18:00', '18:30', '19:00', '19:30', '20:00', 
-  '20:30', '21:00', '21:30', '22:00', '22:30'
+  '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00',
+  '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00',
+  '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30', '00:00'
 ]
 
 export default function AdminPage() {
@@ -135,9 +136,47 @@ export default function AdminPage() {
       })
 
       if (res.ok) {
+        const data = await res.json()
+        const reservation = data.reservation
+
+        // Genera file .ics CONFERMATO (aggiornato, senza "in attesa")
+        const startDate = new Date(`${reservation.date}T${reservation.time}`)
+        const endDate = new Date(startDate.getTime() + reservation.duration * 60 * 60 * 1000)
+
+        const serviceTypeLabel = reservation.serviceType === 'pranzo' ? 'Pranzo' : 
+                                  reservation.serviceType === 'aperitivo' ? 'Aperitivo' : 'Cena'
+
+        const icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//SKALETTE BISTRO//Reservations//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:${reservation.id}@skalette.com
+DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+DTSTART:${startDate.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+DTEND:${endDate.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+SUMMARY:✅ SKALETTE - Prenotazione Confermata - ${reservation.firstName} ${reservation.lastName}
+DESCRIPTION:Tavolo: ${reservation.tableId}\\nPersone: ${reservation.guests}\\nServizio: ${serviceTypeLabel}\\nTelefono: ${reservation.phone}\\nNote: ${reservation.notes || 'Nessuna'}\\n\\n🎉 PRENOTAZIONE CONFERMATA
+LOCATION:SKALETTE BISTRO
+STATUS:CONFIRMED
+SEQUENCE:1
+END:VEVENT
+END:VCALENDAR`
+
+        // Download file .ics
+        const blob = new Blob([icsContent], { type: 'text/calendar' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `skalette-confermata-${reservation.date}-${reservation.id}.ics`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+
         await loadReservations()
         await loadAvailability()
-        setSaveMessage('Prenotazione confermata!')
+        setSaveMessage('Prenotazione confermata! File calendario aggiornato scaricato.')
         setTimeout(() => setSaveMessage(''), 3000)
       }
     } catch (err) {
@@ -146,10 +185,75 @@ export default function AdminPage() {
     }
   }
 
+  const handleCancelConfirmedReservation = async (reservationId: string) => {
+    if (!confirm('Cancellare questa prenotazione confermata? Il tavolo verrà sbloccato e verrà generato un file di cancellazione per il calendario.')) return
+
+    try {
+      // Prima recupera i dati della prenotazione
+      const reservation = reservations.find(r => r.id === reservationId)
+      if (!reservation) return
+
+      const res = await fetch('/api/reservations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reservationId, action: 'cancel' })
+      })
+
+      if (res.ok) {
+        // Genera file .ics di CANCELLAZIONE
+        const startDate = new Date(`${reservation.date}T${reservation.time}`)
+        const endDate = new Date(startDate.getTime() + reservation.duration * 60 * 60 * 1000)
+
+        const serviceTypeLabel = reservation.serviceType === 'pranzo' ? 'Pranzo' : 
+                                  reservation.serviceType === 'aperitivo' ? 'Aperitivo' : 'Cena'
+
+        const icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//SKALETTE BISTRO//Reservations//EN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:${reservation.id}@skalette.com
+DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+DTSTART:${startDate.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+DTEND:${endDate.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+SUMMARY:❌ SKALETTE - Prenotazione Cancellata - ${reservation.firstName} ${reservation.lastName}
+DESCRIPTION:Tavolo: ${reservation.tableId}\\nPersone: ${reservation.guests}\\nServizio: ${serviceTypeLabel}\\nTelefono: ${reservation.phone}\\n\\n❌ PRENOTAZIONE CANCELLATA\\nQuesta prenotazione è stata annullata.
+LOCATION:SKALETTE BISTRO
+STATUS:CANCELLED
+SEQUENCE:3
+END:VEVENT
+END:VCALENDAR`
+
+        // Download file .ics di cancellazione
+        const blob = new Blob([icsContent], { type: 'text/calendar' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `skalette-cancellata-${reservation.date}-${reservation.id}.ics`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+
+        await loadReservations()
+        await loadAvailability()
+        setSaveMessage('Prenotazione cancellata. Tavolo sbloccato. File calendario di cancellazione scaricato.')
+        setTimeout(() => setSaveMessage(''), 3000)
+      }
+    } catch (err) {
+      console.error('Error canceling reservation:', err)
+      alert('Errore durante la cancellazione')
+    }
+  }
+
   const handleRejectReservation = async (reservationId: string) => {
     if (!confirm('Rifiutare questa prenotazione?')) return
 
     try {
+      // Prima recupera i dati della prenotazione
+      const reservation = reservations.find(r => r.id === reservationId)
+      if (!reservation) return
+
       const res = await fetch('/api/reservations', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -157,8 +261,43 @@ export default function AdminPage() {
       })
 
       if (res.ok) {
+        // Genera file .ics di CANCELLAZIONE
+        const startDate = new Date(`${reservation.date}T${reservation.time}`)
+        const endDate = new Date(startDate.getTime() + reservation.duration * 60 * 60 * 1000)
+
+        const serviceTypeLabel = reservation.serviceType === 'pranzo' ? 'Pranzo' : 
+                                  reservation.serviceType === 'aperitivo' ? 'Aperitivo' : 'Cena'
+
+        const icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//SKALETTE BISTRO//Reservations//EN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:${reservation.id}@skalette.com
+DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+DTSTART:${startDate.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+DTEND:${endDate.toISOString().replace(/[-:]/g, '').split('.')[0]}Z
+SUMMARY:❌ SKALETTE - Prenotazione Annullata - ${reservation.firstName} ${reservation.lastName}
+DESCRIPTION:Tavolo: ${reservation.tableId}\\nPersone: ${reservation.guests}\\nServizio: ${serviceTypeLabel}\\nTelefono: ${reservation.phone}\\n\\n❌ PRENOTAZIONE RIFIUTATA\\nQuesta prenotazione è stata annullata.
+LOCATION:SKALETTE BISTRO
+STATUS:CANCELLED
+SEQUENCE:2
+END:VEVENT
+END:VCALENDAR`
+
+        // Download file .ics di cancellazione
+        const blob = new Blob([icsContent], { type: 'text/calendar' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `skalette-annullata-${reservation.date}-${reservation.id}.ics`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+
         await loadReservations()
-        setSaveMessage('Prenotazione rifiutata')
+        setSaveMessage('Prenotazione rifiutata. File calendario di cancellazione scaricato.')
         setTimeout(() => setSaveMessage(''), 3000)
       }
     } catch (err) {
@@ -517,6 +656,17 @@ export default function AdminPage() {
                           className="flex-1 flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-lg transition-colors"
                         >
                           <FiX /> Rifiuta
+                        </button>
+                      </div>
+                    )}
+
+                    {reservation.status === 'confirmed' && (
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => handleCancelConfirmedReservation(reservation.id)}
+                          className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-lg transition-colors"
+                        >
+                          <FiX /> Cancella Prenotazione
                         </button>
                       </div>
                     )}

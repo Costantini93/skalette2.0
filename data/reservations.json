@@ -1,3 +1,34 @@
 {
-  "reservations": []
+  "reservations": [
+    {
+      "id": "RES-1765813976044",
+      "date": "2025-12-20",
+      "time": "20:00",
+      "tableId": "B1",
+      "guests": 2,
+      "firstName": "Alessandro",
+      "lastName": "Costantini",
+      "phone": "+393428691832",
+      "serviceType": "aperitivo",
+      "duration": 1.5,
+      "notes": "",
+      "status": "confirmed",
+      "timestamp": "2025-12-15T15:52:56.044Z"
+    },
+    {
+      "id": "RES-1765815164945",
+      "date": "2025-12-16",
+      "time": "19:30",
+      "tableId": "B3",
+      "guests": 2,
+      "firstName": "Alessandro",
+      "lastName": "Costantini",
+      "phone": "+393428691832",
+      "serviceType": "cena",
+      "duration": 2,
+      "notes": "",
+      "status": "cancelled",
+      "timestamp": "2025-12-15T16:12:44.945Z"
+    }
+  ]
 }

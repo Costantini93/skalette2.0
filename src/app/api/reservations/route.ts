@@ -16,7 +16,7 @@ interface Reservation {
   serviceType: 'pranzo' | 'aperitivo' | 'cena'
   duration: number // in hours
   notes?: string
-  status: 'pending' | 'confirmed' | 'rejected'
+  status: 'pending' | 'confirmed' | 'rejected' | 'cancelled'
   timestamp: string
 }
 
@@ -165,6 +165,54 @@ export async function PUT(request: Request) {
 
       // Aggiungi slot bloccati
       availabilityData.blockedSlots.push(...blockedSlots)
+      
+      // Salva availability
+      await fs.writeFile(availabilityFile, JSON.stringify(availabilityData, null, 2))
+    }
+
+    // Se azione è "cancel", sblocca il tavolo e cambia status
+    if (action === 'cancel') {
+      reservation.status = 'cancelled'
+      
+      // Sblocca tavolo in availability.json
+      const availabilityFile = path.join(process.cwd(), 'data', 'availability.json')
+      let availabilityData
+      
+      try {
+        const availContent = await fs.readFile(availabilityFile, 'utf-8')
+        availabilityData = JSON.parse(availContent)
+      } catch {
+        availabilityData = { blockedSlots: [] }
+      }
+
+      // Calcola slot da sbloccare in base alla durata
+      const [hours, minutes] = reservation.time.split(':').map(Number)
+      const startMinutes = hours * 60 + minutes
+      const durationMinutes = reservation.duration * 60
+      
+      // Rimuovi slot bloccati per questa prenotazione
+      const slotsToRemove = []
+      for (let offset = 0; offset < durationMinutes; offset += 30) {
+        const slotMinutes = startMinutes + offset
+        const slotHours = Math.floor(slotMinutes / 60)
+        const slotMins = slotMinutes % 60
+        const slotTime = `${String(slotHours).padStart(2, '0')}:${String(slotMins).padStart(2, '0')}`
+        
+        slotsToRemove.push({
+          date: reservation.date,
+          time: slotTime,
+          tableId: reservation.tableId
+        })
+      }
+
+      // Filtra via i slot bloccati
+      availabilityData.blockedSlots = availabilityData.blockedSlots.filter(slot => {
+        return !slotsToRemove.some(toRemove => 
+          toRemove.date === slot.date && 
+          toRemove.time === slot.time && 
+          toRemove.tableId === slot.tableId
+        )
+      })
       
       // Salva availability
       await fs.writeFile(availabilityFile, JSON.stringify(availabilityData, null, 2))
