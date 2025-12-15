@@ -191,7 +191,7 @@ export async function PUT(request: Request) {
       const durationMinutes = reservation.duration * 60
       
       // Rimuovi slot bloccati per questa prenotazione
-      const slotsToRemove = []
+      const slotsToRemove: { date: string; time: string; tableId: string }[] = []
       for (let offset = 0; offset < durationMinutes; offset += 30) {
         const slotMinutes = startMinutes + offset
         const slotHours = Math.floor(slotMinutes / 60)
