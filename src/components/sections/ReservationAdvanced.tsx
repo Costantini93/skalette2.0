@@ -152,12 +152,13 @@ export default function ReservationAdvanced() {
     }
   }, [formData.date, formData.time])
 
-  // Aggiornamento automatico ogni 30 secondi quando si è nello step 2 (selezione tavolo)
+  // Aggiornamento automatico ogni 3 secondi quando si è nello step 2 (selezione tavolo)
+  // Questo permette aggiornamenti quasi in tempo reale quando l'admin modifica le prenotazioni
   useEffect(() => {
     if (step === 2) {
       const interval = setInterval(() => {
         loadAvailability()
-      }, 30000) // 30 secondi
+      }, 3000) // 3 secondi per esperienza quasi real-time
 
       return () => clearInterval(interval)
     }
