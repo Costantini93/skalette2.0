@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server'
-import fs from 'fs/promises'
-import path from 'path'
-
-const RESERVATIONS_FILE = path.join(process.cwd(), 'data', 'reservations.json')
+import { sql } from '@vercel/postgres'
+import { initDatabase } from '@/lib/db'
 
 interface BlockedSlot {
   date: string
@@ -43,14 +41,29 @@ function getDuration(serviceType: string): number {
 // GET - Recupera tutte le prenotazioni
 export async function GET() {
   try {
-    const data = await fs.readFile(RESERVATIONS_FILE, 'utf-8')
-    const reservations = JSON.parse(data)
-    return NextResponse.json(reservations)
+    await initDatabase()
+    const { rows } = await sql`
+      SELECT 
+        id,
+        date,
+        time,
+        table_id as "tableId",
+        guests,
+        first_name as "firstName",
+        last_name as "lastName",
+        phone,
+        service_type as "serviceType",
+        duration,
+        notes,
+        status,
+        timestamp
+      FROM reservations
+      ORDER BY date DESC, time DESC
+    `
+    return NextResponse.json({ reservations: rows })
   } catch (error) {
-    // Se il file non esiste, crea struttura vuota
-    const emptyData = { reservations: [] }
-    await fs.writeFile(RESERVATIONS_FILE, JSON.stringify(emptyData, null, 2))
-    return NextResponse.json(emptyData)
+    console.error('Error fetching reservations:', error)
+    return NextResponse.json({ reservations: [] })
   }
 }
 
@@ -110,14 +123,27 @@ export async function POST(request: Request) {
       )
     }
 
+    await initDatabase()
+
     // Leggi prenotazioni esistenti
-    let data
-    try {
-      const fileContent = await fs.readFile(RESERVATIONS_FILE, 'utf-8')
-      data = JSON.parse(fileContent)
-    } catch {
-      data = { reservations: [] }
-    }
+    const { rows } = await sql`
+      SELECT 
+        id,
+        date,
+        time,
+        table_id as "tableId",
+        guests,
+        first_name as "firstName",
+        last_name as "lastName",
+        phone,
+        service_type as "serviceType",
+        duration,
+        notes,
+        status,
+        timestamp
+      FROM reservations
+      WHERE date >= CURRENT_DATE
+    `
 
     const duration = getDuration(body.serviceType)
 
@@ -126,7 +152,7 @@ export async function POST(request: Request) {
       body.date,
       body.time,
       duration,
-      data.reservations || [],
+      rows,
       body.tableId
     )
 
@@ -146,8 +172,32 @@ export async function POST(request: Request) {
     // (l'admin potrà gestire la situazione manualmente)
 
     // Crea nuova prenotazione
-    const newReservation: Reservation = {
-      id: `RES-${Date.now()}`,
+    const reservationId = `RES-${Date.now()}`
+    const timestamp = new Date().toISOString()
+
+    await sql`
+      INSERT INTO reservations (
+        id, date, time, table_id, guests, first_name, last_name, 
+        phone, service_type, duration, notes, status, timestamp
+      ) VALUES (
+        ${reservationId},
+        ${body.date},
+        ${body.time},
+        ${body.tableId},
+        ${parseInt(body.guests)},
+        ${body.firstName},
+        ${body.lastName},
+        ${body.phone},
+        ${body.serviceType},
+        ${duration},
+        ${body.notes || ''},
+        'pending',
+        ${timestamp}
+      )
+    `
+
+    const newReservation = {
+      id: reservationId,
       date: body.date,
       time: body.time,
       tableId: body.tableId,
@@ -159,14 +209,8 @@ export async function POST(request: Request) {
       duration: duration,
       notes: body.notes || '',
       status: 'pending',
-      timestamp: new Date().toISOString()
+      timestamp: timestamp
     }
-
-    // Aggiungi alla lista
-    data.reservations.push(newReservation)
-
-    // Salva
-    await fs.writeFile(RESERVATIONS_FILE, JSON.stringify(data, null, 2))
 
     return NextResponse.json({ 
       success: true, 
@@ -187,163 +231,95 @@ export async function PUT(request: Request) {
     const body = await request.json()
     const { reservationId, status, action } = body
 
-    // Leggi file
-    const fileContent = await fs.readFile(RESERVATIONS_FILE, 'utf-8')
-    const data = JSON.parse(fileContent)
+    await initDatabase()
 
     // Trova prenotazione
-    const reservation = data.reservations.find((r: Reservation) => r.id === reservationId)
-    if (!reservation) {
+    const { rows } = await sql`
+      SELECT 
+        id,
+        date,
+        time,
+        table_id as "tableId",
+        guests,
+        first_name as "firstName",
+        last_name as "lastName",
+        phone,
+        service_type as "serviceType",
+        duration,
+        notes,
+        status,
+        timestamp
+      FROM reservations
+      WHERE id = ${reservationId}
+    `
+
+    if (rows.length === 0) {
       return NextResponse.json({ error: 'Prenotazione non trovata' }, { status: 404 })
     }
 
-    // Aggiorna status
-    if (status) {
-      reservation.status = status
-    }
+    const reservation = rows[0]
+    let newStatus = status || reservation.status
 
     // Se azione è "confirm", blocca anche il tavolo
     if (action === 'confirm') {
-      reservation.status = 'confirmed'
+      newStatus = 'confirmed'
       
-      // Blocca tavolo in availability.json
-      const availabilityFile = path.join(process.cwd(), 'data', 'availability.json')
-      let availabilityData
-      
-      try {
-        const availContent = await fs.readFile(availabilityFile, 'utf-8')
-        availabilityData = JSON.parse(availContent)
-      } catch {
-        availabilityData = { blockedSlots: [] }
-      }
-
       // Calcola slot da bloccare in base alla durata
-      const blockedSlots = []
       const [hours, minutes] = reservation.time.split(':').map(Number)
       const startMinutes = hours * 60 + minutes
       const durationMinutes = reservation.duration * 60
       
-      // Genera slot ogni 30 minuti per la durata
+      // Genera e inserisci slot bloccati
       for (let offset = 0; offset < durationMinutes; offset += 30) {
         const slotMinutes = startMinutes + offset
         const slotHours = Math.floor(slotMinutes / 60)
         const slotMins = slotMinutes % 60
         const slotTime = `${String(slotHours).padStart(2, '0')}:${String(slotMins).padStart(2, '0')}`
         
-        blockedSlots.push({
-          date: reservation.date,
-          time: slotTime,
-          tableId: reservation.tableId
-        })
+        await sql`
+          INSERT INTO blocked_slots (date, time, table_id)
+          VALUES (${reservation.date}, ${slotTime}, ${reservation.tableId})
+          ON CONFLICT (date, time, table_id) DO NOTHING
+        `
       }
-
-      // Aggiungi slot bloccati
-      availabilityData.blockedSlots.push(...blockedSlots)
-      
-      // Salva availability
-      await fs.writeFile(availabilityFile, JSON.stringify(availabilityData, null, 2))
     }
 
-    // Se azione è "cancel", sblocca il tavolo e cambia status
-    if (action === 'cancel') {
-      reservation.status = 'cancelled'
+    // Se azione è "cancel" o "complete", sblocca il tavolo
+    if (action === 'cancel' || action === 'complete') {
+      newStatus = action === 'cancel' ? 'cancelled' : 'completed'
       
-      // Sblocca tavolo in availability.json
-      const availabilityFile = path.join(process.cwd(), 'data', 'availability.json')
-      let availabilityData
-      
-      try {
-        const availContent = await fs.readFile(availabilityFile, 'utf-8')
-        availabilityData = JSON.parse(availContent)
-      } catch {
-        availabilityData = { blockedSlots: [] }
-      }
-
-      // Calcola slot da sbloccare in base alla durata
+      // Calcola slot da sbloccare
       const [hours, minutes] = reservation.time.split(':').map(Number)
       const startMinutes = hours * 60 + minutes
       const durationMinutes = reservation.duration * 60
       
       // Rimuovi slot bloccati per questa prenotazione
-      const slotsToRemove: { date: string; time: string; tableId: string }[] = []
       for (let offset = 0; offset < durationMinutes; offset += 30) {
         const slotMinutes = startMinutes + offset
         const slotHours = Math.floor(slotMinutes / 60)
         const slotMins = slotMinutes % 60
         const slotTime = `${String(slotHours).padStart(2, '0')}:${String(slotMins).padStart(2, '0')}`
         
-        slotsToRemove.push({
-          date: reservation.date,
-          time: slotTime,
-          tableId: reservation.tableId
-        })
+        await sql`
+          DELETE FROM blocked_slots
+          WHERE date = ${reservation.date}
+            AND time = ${slotTime}
+            AND table_id = ${reservation.tableId}
+        `
       }
-
-      // Filtra via i slot bloccati
-      availabilityData.blockedSlots = availabilityData.blockedSlots.filter((slot: BlockedSlot) => {
-        return !slotsToRemove.some(toRemove => 
-          toRemove.date === slot.date && 
-          toRemove.time === slot.time && 
-          toRemove.tableId === slot.tableId
-        )
-      })
-      
-      // Salva availability
-      await fs.writeFile(availabilityFile, JSON.stringify(availabilityData, null, 2))
     }
 
-    // Se azione è "complete", sblocca il tavolo e cambia status in completed
-    if (action === 'complete') {
-      reservation.status = 'completed'
-      
-      // Sblocca tavolo in availability.json
-      const availabilityFile = path.join(process.cwd(), 'data', 'availability.json')
-      let availabilityData
-      
-      try {
-        const availContent = await fs.readFile(availabilityFile, 'utf-8')
-        availabilityData = JSON.parse(availContent)
-      } catch {
-        availabilityData = { blockedSlots: [] }
-      }
+    // Aggiorna status prenotazione
+    await sql`
+      UPDATE reservations
+      SET status = ${newStatus}
+      WHERE id = ${reservationId}
+    `
 
-      // Calcola slot da sbloccare in base alla durata
-      const [hours, minutes] = reservation.time.split(':').map(Number)
-      const startMinutes = hours * 60 + minutes
-      const durationMinutes = reservation.duration * 60
-      
-      // Rimuovi slot bloccati per questa prenotazione
-      const slotsToRemove: { date: string; time: string; tableId: string }[] = []
-      for (let offset = 0; offset < durationMinutes; offset += 30) {
-        const slotMinutes = startMinutes + offset
-        const slotHours = Math.floor(slotMinutes / 60)
-        const slotMins = slotMinutes % 60
-        const slotTime = `${String(slotHours).padStart(2, '0')}:${String(slotMins).padStart(2, '0')}`
-        
-        slotsToRemove.push({
-          date: reservation.date,
-          time: slotTime,
-          tableId: reservation.tableId
-        })
-      }
-
-      // Filtra via i slot bloccati
-      availabilityData.blockedSlots = availabilityData.blockedSlots.filter((slot: BlockedSlot) => {
-        return !slotsToRemove.some(toRemove => 
-          toRemove.date === slot.date && 
-          toRemove.time === slot.time && 
-          toRemove.tableId === slot.tableId
-        )
-      })
-      
-      // Salva availability
-      await fs.writeFile(availabilityFile, JSON.stringify(availabilityData, null, 2))
-    }
-
-    // Salva prenotazioni aggiornate
-    await fs.writeFile(RESERVATIONS_FILE, JSON.stringify(data, null, 2))
-
-    return NextResponse.json({ success: true, reservation })
+    return NextResponse.json({ 
+      success: true, 
+      reservation: { ...reservation, status: newStatus }
+    })
   } catch (error) {
     console.error('Error updating reservation:', error)
     return NextResponse.json(

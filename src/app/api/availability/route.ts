@@ -1,27 +1,19 @@
 import { NextResponse } from 'next/server'
-import fs from 'fs'
-import path from 'path'
-
-const DATA_FILE = path.join(process.cwd(), 'data', 'availability.json')
-
-// Assicura che la directory e il file esistano
-function ensureDataFile() {
-  const dir = path.dirname(DATA_FILE)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ blockedSlots: [] }))
-  }
-}
+import { sql } from '@vercel/postgres'
+import { initDatabase } from '@/lib/db'
 
 // Leggi disponibilità
 export async function GET() {
   try {
-    ensureDataFile()
-    const data = fs.readFileSync(DATA_FILE, 'utf-8')
-    return NextResponse.json(JSON.parse(data))
+    await initDatabase()
+    const { rows } = await sql`
+      SELECT date, time, table_id as "tableId"
+      FROM blocked_slots
+      ORDER BY date, time
+    `
+    return NextResponse.json({ blockedSlots: rows })
   } catch (error) {
+    console.error('Error fetching availability:', error)
     return NextResponse.json({ blockedSlots: [] })
   }
 }
@@ -30,10 +22,25 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    ensureDataFile()
-    fs.writeFileSync(DATA_FILE, JSON.stringify(body, null, 2))
+    await initDatabase()
+    
+    // Prima cancella tutti gli slot bloccati
+    await sql`DELETE FROM blocked_slots`
+    
+    // Poi inserisci i nuovi
+    if (body.blockedSlots && body.blockedSlots.length > 0) {
+      for (const slot of body.blockedSlots) {
+        await sql`
+          INSERT INTO blocked_slots (date, time, table_id)
+          VALUES (${slot.date}, ${slot.time}, ${slot.tableId})
+          ON CONFLICT (date, time, table_id) DO NOTHING
+        `
+      }
+    }
+    
     return NextResponse.json({ success: true })
   } catch (error) {
+    console.error('Error saving availability:', error)
     return NextResponse.json({ success: false, error: 'Failed to save data' }, { status: 500 })
   }
 }
