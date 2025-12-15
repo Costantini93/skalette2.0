@@ -145,6 +145,24 @@ export default function ReservationAdvanced() {
     loadAvailability()
   }, [])
 
+  // Ricarica disponibilità quando cambiano data o orario
+  useEffect(() => {
+    if (formData.date || formData.time) {
+      loadAvailability()
+    }
+  }, [formData.date, formData.time])
+
+  // Aggiornamento automatico ogni 30 secondi quando si è nello step 2 (selezione tavolo)
+  useEffect(() => {
+    if (step === 2) {
+      const interval = setInterval(() => {
+        loadAvailability()
+      }, 30000) // 30 secondi
+
+      return () => clearInterval(interval)
+    }
+  }, [step])
+
   // Imposta la data su oggi quando si passa allo step 2
   useEffect(() => {
     if (step === 2 && !formData.date) {
