@@ -61,7 +61,7 @@ function checkOverlap(
   newDuration: number,
   existingReservations: Reservation[],
   tableId: string
-): boolean {
+): { hasOverlap: boolean; nextReservationTime?: string; availableUntil?: string } {
   const [newHours, newMinutes] = newStartTime.split(':').map(Number)
   const newStartMinutes = newHours * 60 + newMinutes
   const newEndMinutes = newStartMinutes + newDuration * 60
@@ -84,11 +84,16 @@ function checkOverlap(
     // Verifica sovrapposizione: la nuova prenotazione inizia prima che finisca la esistente
     // E la nuova prenotazione finisce dopo che inizia la esistente
     if (newStartMinutes < resEndMinutes && newEndMinutes > resStartMinutes) {
-      return true // C'è sovrapposizione
+      // C'è sovrapposizione - restituisce l'ora di inizio della prenotazione esistente
+      return {
+        hasOverlap: true,
+        nextReservationTime: res.time,
+        availableUntil: res.time
+      }
     }
   }
 
-  return false // Nessuna sovrapposizione
+  return { hasOverlap: false } // Nessuna sovrapposizione
 }
 
 // POST - Crea nuova prenotazione
@@ -117,7 +122,7 @@ export async function POST(request: Request) {
     const duration = getDuration(body.serviceType)
 
     // Controlla sovrapposizioni con prenotazioni esistenti
-    const hasOverlap = checkOverlap(
+    const overlapCheck = checkOverlap(
       body.date,
       body.time,
       duration,
@@ -125,12 +130,20 @@ export async function POST(request: Request) {
       body.tableId
     )
 
-    if (hasOverlap) {
+    // Se c'è sovrapposizione e l'utente non ha confermato, restituisci warning
+    if (overlapCheck.hasOverlap && !body.confirmOverlap) {
       return NextResponse.json(
-        { error: 'Il tavolo selezionato è già occupato in questo orario. La durata del servizio si sovrappone con un\'altra prenotazione.' },
-        { status: 409 }
+        { 
+          warning: true,
+          availableUntil: overlapCheck.availableUntil,
+          message: `Questo tavolo è disponibile fino alle ${overlapCheck.availableUntil}. Vuoi procedere comunque?`
+        },
+        { status: 200 }
       )
     }
+
+    // Se c'è sovrapposizione e l'utente ha confermato, procedi comunque con la prenotazione
+    // (l'admin potrà gestire la situazione manualmente)
 
     // Crea nuova prenotazione
     const newReservation: Reservation = {

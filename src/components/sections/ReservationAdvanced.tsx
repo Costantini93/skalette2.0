@@ -49,6 +49,9 @@ export default function ReservationAdvanced() {
   })
 
   const [step, setStep] = useState(1) // 1: Persone, 2: Tavolo, 3: Dettagli
+  const [showWarning, setShowWarning] = useState(false)
+  const [warningMessage, setWarningMessage] = useState('')
+  const [availableUntil, setAvailableUntil] = useState('')
   const [formData, setFormData] = useState({
     guests: '',
     selectedTable: '',
@@ -263,7 +266,7 @@ export default function ReservationAdvanced() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent, confirmOverlap = false) => {
     e.preventDefault()
 
     try {
@@ -283,19 +286,32 @@ export default function ReservationAdvanced() {
           phone: formData.phone,
           serviceType: formData.serviceType,
           notes: formData.notes,
+          confirmOverlap: confirmOverlap,
         }),
       })
 
       const result = await response.json()
 
+      // Gestione warning per sovrapposizione
+      if (result.warning && !confirmOverlap) {
+        setWarningMessage(result.message)
+        setAvailableUntil(result.availableUntil)
+        setShowWarning(true)
+        return
+      }
+
       if (!response.ok) {
         // Gestione errore sovrapposizione
         if (response.status === 409) {
           alert(result.error || 'Il tavolo selezionato è già prenotato per questo orario considerando la durata del servizio.')
+          setShowWarning(false)
           return
         }
         throw new Error(result.error || 'Errore durante l\'invio della prenotazione')
       }
+
+      // Reset warning se tutto ok
+      setShowWarning(false)
 
       // Calcola durata in base al tipo di servizio
       let durationHours = 2
@@ -1148,6 +1164,41 @@ END:VCALENDAR`
                     </div>
                   </div>
 
+                  {/* Banner Warning Sovrapposizione */}
+                  {showWarning && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-yellow-500/10 border-2 border-yellow-500 rounded-xl p-6 mb-6"
+                    >
+                      <div className="flex items-start gap-4">
+                        <FiAlertCircle className="text-yellow-500 text-2xl mt-1 flex-shrink-0" />
+                        <div className="flex-1">
+                          <h4 className="font-bold text-yellow-500 text-lg mb-2">Attenzione</h4>
+                          <p className="text-white/90 mb-4">{warningMessage}</p>
+                          <div className="flex gap-3 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={(e) => handleSubmit(e, true)}
+                              className="px-6 py-3 bg-primary-500 hover:bg-primary-600 text-white rounded-xl font-semibold transition-all"
+                            >
+                              Procedi Comunque
+                            </button>
+                            <MagneticButton
+                              variant="outline"
+                              onClick={() => {
+                                setShowWarning(false)
+                                setStep(2)
+                              }}
+                            >
+                              Scegli Altro Tavolo
+                            </MagneticButton>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
                   <div className="flex justify-between">
                     <MagneticButton
                       variant="outline"
@@ -1155,7 +1206,7 @@ END:VCALENDAR`
                     >
                       Indietro
                     </MagneticButton>
-                    {isStepValid(3) && (
+                    {isStepValid(3) && !showWarning && (
                       <MagneticButton variant="primary" size="large">
                         Conferma Prenotazione
                       </MagneticButton>
