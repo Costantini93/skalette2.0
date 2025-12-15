@@ -286,11 +286,16 @@ export default function ReservationAdvanced() {
         }),
       })
 
-      if (!response.ok) {
-        throw new Error('Errore durante l\'invio della prenotazione')
-      }
-
       const result = await response.json()
+
+      if (!response.ok) {
+        // Gestione errore sovrapposizione
+        if (response.status === 409) {
+          alert(result.error || 'Il tavolo selezionato è già prenotato per questo orario considerando la durata del servizio.')
+          return
+        }
+        throw new Error(result.error || 'Errore durante l\'invio della prenotazione')
+      }
 
       // Calcola durata in base al tipo di servizio
       let durationHours = 2

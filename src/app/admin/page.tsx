@@ -26,7 +26,7 @@ interface Reservation {
   serviceType: 'pranzo' | 'aperitivo' | 'cena'
   duration: number
   notes?: string
-  status: 'pending' | 'confirmed' | 'rejected' | 'cancelled'
+  status: 'pending' | 'confirmed' | 'rejected' | 'cancelled' | 'completed'
   timestamp: string
 }
 
@@ -303,6 +303,28 @@ END:VCALENDAR`
     } catch (err) {
       console.error('Error rejecting reservation:', err)
       alert('Errore durante il rifiuto')
+    }
+  }
+
+  const handleCompleteReservation = async (reservationId: string) => {
+    if (!confirm('Marcare questa prenotazione come completata? Il tavolo verrà liberato.')) return
+
+    try {
+      const res = await fetch('/api/reservations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reservationId, action: 'complete' })
+      })
+
+      if (res.ok) {
+        await loadReservations()
+        await loadAvailability()
+        setSaveMessage('Prenotazione completata! Tavolo liberato.')
+        setTimeout(() => setSaveMessage(''), 3000)
+      }
+    } catch (err) {
+      console.error('Error completing reservation:', err)
+      alert('Errore durante il completamento')
     }
   }
 
@@ -662,6 +684,12 @@ END:VCALENDAR`
 
                     {reservation.status === 'confirmed' && (
                       <div className="flex gap-3">
+                        <button
+                          onClick={() => handleCompleteReservation(reservation.id)}
+                          className="flex-1 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 rounded-lg transition-colors"
+                        >
+                          <FiCheck /> Termina (Libera Tavolo)
+                        </button>
                         <button
                           onClick={() => handleCancelConfirmedReservation(reservation.id)}
                           className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-lg transition-colors"
