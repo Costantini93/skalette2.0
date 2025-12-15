@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { FiLock, FiCalendar, FiLogOut } from 'react-icons/fi'
+import { FiLock, FiCalendar, FiLogOut, FiClipboard, FiCheck, FiX, FiUser, FiPhone, FiClock } from 'react-icons/fi'
 
 interface BlockedSlot {
   date: string // YYYY-MM-DD
@@ -12,6 +12,22 @@ interface BlockedSlot {
 
 interface AvailabilityData {
   blockedSlots: BlockedSlot[]
+}
+
+interface Reservation {
+  id: string
+  date: string
+  time: string
+  tableId: string
+  guests: number
+  firstName: string
+  lastName: string
+  phone: string
+  serviceType: 'pranzo' | 'aperitivo' | 'cena'
+  duration: number
+  notes?: string
+  status: 'pending' | 'confirmed' | 'rejected'
+  timestamp: string
 }
 
 const tables = [
@@ -29,16 +45,20 @@ export default function AdminPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState<'availability' | 'reservations'>('availability')
   
   const [availabilityData, setAvailabilityData] = useState<AvailabilityData>({ blockedSlots: [] })
+  const [reservations, setReservations] = useState<Reservation[]>([])
   const [selectedDate, setSelectedDate] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
+  const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed' | 'rejected'>('pending')
 
   useEffect(() => {
     const token = localStorage.getItem('adminToken')
     if (token === 'admin_authenticated') {
       setIsAuthenticated(true)
       loadAvailability()
+      loadReservations()
     }
   }, [])
 
@@ -67,6 +87,7 @@ export default function AdminPage() {
         localStorage.setItem('adminToken', data.token)
         setIsAuthenticated(true)
         loadAvailability()
+        loadReservations()
       } else {
         setError(data.message)
       }
@@ -90,6 +111,59 @@ export default function AdminPage() {
       setAvailabilityData(data)
     } catch (err) {
       console.error('Failed to load availability:', err)
+    }
+  }
+
+  const loadReservations = async () => {
+    try {
+      const res = await fetch('/api/reservations')
+      const data = await res.json()
+      setReservations(data.reservations || [])
+    } catch (err) {
+      console.error('Failed to load reservations:', err)
+    }
+  }
+
+  const handleAcceptReservation = async (reservationId: string) => {
+    if (!confirm('Confermare questa prenotazione? Il tavolo verrà bloccato automaticamente.')) return
+
+    try {
+      const res = await fetch('/api/reservations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reservationId, action: 'confirm' })
+      })
+
+      if (res.ok) {
+        await loadReservations()
+        await loadAvailability()
+        setSaveMessage('Prenotazione confermata!')
+        setTimeout(() => setSaveMessage(''), 3000)
+      }
+    } catch (err) {
+      console.error('Error accepting reservation:', err)
+      alert('Errore durante la conferma')
+    }
+  }
+
+  const handleRejectReservation = async (reservationId: string) => {
+    if (!confirm('Rifiutare questa prenotazione?')) return
+
+    try {
+      const res = await fetch('/api/reservations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reservationId, status: 'rejected' })
+      })
+
+      if (res.ok) {
+        await loadReservations()
+        setSaveMessage('Prenotazione rifiutata')
+        setTimeout(() => setSaveMessage(''), 3000)
+      }
+    } catch (err) {
+      console.error('Error rejecting reservation:', err)
+      alert('Errore durante il rifiuto')
     }
   }
 
@@ -184,8 +258,8 @@ export default function AdminPage() {
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-white mb-2">Gestione Disponibilità Tavoli</h1>
-            <p className="text-white/60">Blocca i tavoli già prenotati da Dish o altri canali</p>
+            <h1 className="text-3xl font-bold text-white mb-2">Pannello Amministrazione</h1>
+            <p className="text-white/60">Gestisci disponibilità e prenotazioni</p>
           </div>
           <button
             onClick={handleLogout}
@@ -195,74 +269,269 @@ export default function AdminPage() {
           </button>
         </div>
 
-        {/* Date Selector */}
-        <div className="bg-dark-900 border border-primary-500/20 rounded-xl p-6 mb-6">
-          <label className="block text-white font-medium mb-3 flex items-center gap-2">
-            <FiCalendar className="text-primary-400" />
-            Seleziona Data
-          </label>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:border-primary-500"
-          />
-          {saveMessage && (
-            <span className="ml-4 text-green-400 text-sm">{saveMessage}</span>
-          )}
+        {/* Tabs */}
+        <div className="flex gap-4 mb-6">
+          <button
+            onClick={() => setActiveTab('availability')}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${
+              activeTab === 'availability'
+                ? 'bg-primary-500 text-dark-950'
+                : 'bg-dark-800 text-white/70 hover:text-white'
+            }`}
+          >
+            <FiCalendar /> Disponibilità Tavoli
+          </button>
+          <button
+            onClick={() => setActiveTab('reservations')}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${
+              activeTab === 'reservations'
+                ? 'bg-primary-500 text-dark-950'
+                : 'bg-dark-800 text-white/70 hover:text-white'
+            }`}
+          >
+            <FiClipboard /> Gestione Prenotazioni
+          </button>
         </div>
 
-        {/* Availability Grid */}
-        <div className="bg-dark-900 border border-primary-500/20 rounded-xl p-6 overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="text-left text-white/80 font-medium pb-4 pr-4">Orario</th>
-                {tables.map(table => (
-                  <th key={table} className="text-center text-white/80 font-medium pb-4 px-2">
-                    {table}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {timeSlots.map(time => (
-                <tr key={time} className="border-t border-dark-800">
-                  <td className="py-3 pr-4 text-white/70 font-mono">{time}</td>
-                  {tables.map(table => {
-                    const blocked = isBlocked(selectedDate, time, table)
-                    return (
-                      <td key={table} className="px-2 py-3">
+        {saveMessage && (
+          <div className="mb-4 bg-green-500/10 border border-green-500/30 rounded-lg p-3 text-green-400">
+            {saveMessage}
+          </div>
+        )}
+
+        {/* Availability Tab */}
+        {activeTab === 'availability' && (
+          <div>
+            {/* Date Selector */}
+            <div className="bg-dark-900 border border-primary-500/20 rounded-xl p-6 mb-6">
+              <label className="block text-white font-medium mb-3 flex items-center gap-2">
+                <FiCalendar className="text-primary-400" />
+                Seleziona Data
+              </label>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:border-primary-500"
+              />
+            </div>
+
+            {/* Availability Grid */}
+            <div className="bg-dark-900 border border-primary-500/20 rounded-xl p-6 overflow-x-auto">
+              <p className="text-white/60 mb-4">Blocca i tavoli già prenotati da altri canali (Dish, telefono, ecc.)</p>
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="text-left text-white/80 font-medium pb-4 pr-4">Orario</th>
+                    {tables.map(table => (
+                      <th key={table} className="text-center text-white/80 font-medium pb-4 px-2">
+                        {table}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {timeSlots.map(time => (
+                    <tr key={time} className="border-t border-dark-800">
+                      <td className="py-3 pr-4 text-white/70 font-mono">{time}</td>
+                      {tables.map(table => {
+                        const blocked = isBlocked(selectedDate, time, table)
+                        return (
+                          <td key={table} className="px-2 py-3">
+                            <button
+                              onClick={() => toggleBlock(selectedDate, time, table)}
+                              className={`w-full h-10 rounded-lg font-bold text-sm transition-all ${
+                                blocked
+                                  ? 'bg-red-500/20 border-2 border-red-500 text-red-400 hover:bg-red-500/30'
+                                  : 'bg-green-500/20 border-2 border-green-500 text-green-400 hover:bg-green-500/30'
+                              }`}
+                            >
+                              {blocked ? 'OCCUPATO' : 'Libero'}
+                            </button>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Legend */}
+            <div className="mt-6 flex gap-6 justify-center">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded bg-green-500/20 border-2 border-green-500"></div>
+                <span className="text-white/70 text-sm">Disponibile per prenotazioni online</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded bg-red-500/20 border-2 border-red-500"></div>
+                <span className="text-white/70 text-sm">Bloccato (già prenotato)</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Reservations Tab */}
+        {activeTab === 'reservations' && (
+          <div>
+            {/* Filters */}
+            <div className="flex gap-4 mb-6">
+              <button
+                onClick={() => setFilter('pending')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  filter === 'pending'
+                    ? 'bg-yellow-500/20 border-2 border-yellow-500 text-yellow-400'
+                    : 'bg-dark-800 text-white/70 hover:text-white'
+                }`}
+              >
+                Da Confermare ({reservations.filter(r => r.status === 'pending').length})
+              </button>
+              <button
+                onClick={() => setFilter('confirmed')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  filter === 'confirmed'
+                    ? 'bg-green-500/20 border-2 border-green-500 text-green-400'
+                    : 'bg-dark-800 text-white/70 hover:text-white'
+                }`}
+              >
+                Confermate ({reservations.filter(r => r.status === 'confirmed').length})
+              </button>
+              <button
+                onClick={() => setFilter('rejected')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  filter === 'rejected'
+                    ? 'bg-red-500/20 border-2 border-red-500 text-red-400'
+                    : 'bg-dark-800 text-white/70 hover:text-white'
+                }`}
+              >
+                Rifiutate ({reservations.filter(r => r.status === 'rejected').length})
+              </button>
+              <button
+                onClick={() => setFilter('all')}
+                className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                  filter === 'all'
+                    ? 'bg-primary-500/20 border-2 border-primary-500 text-primary-400'
+                    : 'bg-dark-800 text-white/70 hover:text-white'
+                }`}
+              >
+                Tutte ({reservations.length})
+              </button>
+            </div>
+
+            {/* Reservations List */}
+            <div className="space-y-4">
+              {reservations
+                .filter(r => filter === 'all' || r.status === filter)
+                .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                .map(reservation => (
+                  <div
+                    key={reservation.id}
+                    className={`bg-dark-900 border-2 rounded-xl p-6 ${
+                      reservation.status === 'pending'
+                        ? 'border-yellow-500/30'
+                        : reservation.status === 'confirmed'
+                        ? 'border-green-500/30'
+                        : 'border-red-500/30'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h3 className="text-xl font-bold text-white mb-1">
+                          {reservation.firstName} {reservation.lastName}
+                        </h3>
+                        <p className="text-white/60 text-sm">
+                          ID: {reservation.id} | Ricevuta: {new Date(reservation.timestamp).toLocaleString('it-IT')}
+                        </p>
+                      </div>
+                      <div className={`px-4 py-2 rounded-lg font-bold text-sm ${
+                        reservation.status === 'pending'
+                          ? 'bg-yellow-500/20 text-yellow-400'
+                          : reservation.status === 'confirmed'
+                          ? 'bg-green-500/20 text-green-400'
+                          : 'bg-red-500/20 text-red-400'
+                      }`}>
+                        {reservation.status === 'pending' ? 'DA CONFERMARE' : 
+                         reservation.status === 'confirmed' ? 'CONFERMATA' : 'RIFIUTATA'}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                      <div>
+                        <p className="text-white/60 text-sm mb-1 flex items-center gap-2">
+                          <FiCalendar /> Data
+                        </p>
+                        <p className="text-white font-medium">{reservation.date}</p>
+                      </div>
+                      <div>
+                        <p className="text-white/60 text-sm mb-1 flex items-center gap-2">
+                          <FiClock /> Orario
+                        </p>
+                        <p className="text-white font-medium">{reservation.time}</p>
+                      </div>
+                      <div>
+                        <p className="text-white/60 text-sm mb-1">Tavolo</p>
+                        <p className="text-white font-medium">{reservation.tableId}</p>
+                      </div>
+                      <div>
+                        <p className="text-white/60 text-sm mb-1 flex items-center gap-2">
+                          <FiUser /> Persone
+                        </p>
+                        <p className="text-white font-medium">{reservation.guests}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                      <div>
+                        <p className="text-white/60 text-sm mb-1 flex items-center gap-2">
+                          <FiPhone /> Telefono
+                        </p>
+                        <p className="text-white font-medium">{reservation.phone}</p>
+                      </div>
+                      <div>
+                        <p className="text-white/60 text-sm mb-1">Servizio</p>
+                        <p className="text-white font-medium">
+                          {reservation.serviceType === 'pranzo' ? 'Pranzo' : 
+                           reservation.serviceType === 'aperitivo' ? 'Aperitivo' : 'Cena'} 
+                          ({reservation.duration}h)
+                        </p>
+                      </div>
+                    </div>
+
+                    {reservation.notes && (
+                      <div className="mb-4">
+                        <p className="text-white/60 text-sm mb-1">Note</p>
+                        <p className="text-white/80">{reservation.notes}</p>
+                      </div>
+                    )}
+
+                    {reservation.status === 'pending' && (
+                      <div className="flex gap-3">
                         <button
-                          onClick={() => toggleBlock(selectedDate, time, table)}
-                          className={`w-full h-10 rounded-lg font-bold text-sm transition-all ${
-                            blocked
-                              ? 'bg-red-500/20 border-2 border-red-500 text-red-400 hover:bg-red-500/30'
-                              : 'bg-green-500/20 border-2 border-green-500 text-green-400 hover:bg-green-500/30'
-                          }`}
+                          onClick={() => handleAcceptReservation(reservation.id)}
+                          className="flex-1 flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition-colors"
                         >
-                          {blocked ? 'OCCUPATO' : 'Libero'}
+                          <FiCheck /> Accetta e Blocca Tavolo
                         </button>
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                        <button
+                          onClick={() => handleRejectReservation(reservation.id)}
+                          className="flex-1 flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-lg transition-colors"
+                        >
+                          <FiX /> Rifiuta
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
 
-        {/* Legend */}
-        <div className="mt-6 flex gap-6 justify-center">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-green-500/20 border-2 border-green-500"></div>
-            <span className="text-white/70 text-sm">Disponibile per prenotazioni online</span>
+              {reservations.filter(r => filter === 'all' || r.status === filter).length === 0 && (
+                <div className="text-center py-12 text-white/60">
+                  <FiClipboard className="mx-auto text-4xl mb-4" />
+                  <p>Nessuna prenotazione {filter !== 'all' && `${filter === 'pending' ? 'da confermare' : filter === 'confirmed' ? 'confermata' : 'rifiutata'}`}</p>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-red-500/20 border-2 border-red-500"></div>
-            <span className="text-white/70 text-sm">Bloccato (già prenotato)</span>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   )

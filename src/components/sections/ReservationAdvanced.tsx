@@ -57,6 +57,7 @@ export default function ReservationAdvanced() {
     firstName: '',
     lastName: '',
     phone: '',
+    serviceType: '', // pranzo, aperitivo, cena
     notes: '',
   })
   const [showSuccess, setShowSuccess] = useState(false)
@@ -164,22 +165,57 @@ export default function ReservationAdvanced() {
     }
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Crea evento per calendario
-    const startDate = new Date(`${formData.date}T${formData.time}`)
-    const endDate = new Date(startDate.getTime() + 2 * 60 * 60 * 1000) // +2 ore
+    try {
+      // Invia prenotazione al server
+      const response = await fetch('/api/reservations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          date: formData.date,
+          time: formData.time,
+          tableId: formData.selectedTable,
+          guests: formData.guests,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phone: formData.phone,
+          serviceType: formData.serviceType,
+          notes: formData.notes,
+        }),
+      })
 
-    const event = {
-      title: `⏳ SKALETTE - Prenotazione in Attesa di Conferma - ${formData.firstName} ${formData.lastName}`,
-      description: `Tavolo: ${formData.selectedTable}\nPersone: ${formData.guests}\nTelefono: ${formData.phone}\nNote: ${formData.notes}`,
-      start: startDate.toISOString(),
-      end: endDate.toISOString(),
-    }
+      if (!response.ok) {
+        throw new Error('Errore durante l\'invio della prenotazione')
+      }
 
-    // Genera file .ics per Google Calendar, Apple Calendar, Outlook
-    const icsContent = `BEGIN:VCALENDAR
+      const result = await response.json()
+
+      // Calcola durata in base al tipo di servizio
+      let durationHours = 2
+      if (formData.serviceType === 'aperitivo') {
+        durationHours = 1.5
+      }
+
+      // Crea evento per calendario
+      const startDate = new Date(`${formData.date}T${formData.time}`)
+      const endDate = new Date(startDate.getTime() + durationHours * 60 * 60 * 1000)
+
+      const serviceTypeLabel = formData.serviceType === 'pranzo' ? 'Pranzo' : 
+                                formData.serviceType === 'aperitivo' ? 'Aperitivo' : 'Cena'
+
+      const event = {
+        title: `⏳ SKALETTE - Prenotazione in Attesa di Conferma - ${formData.firstName} ${formData.lastName}`,
+        description: `Tavolo: ${formData.selectedTable}\nPersone: ${formData.guests}\nServizio: ${serviceTypeLabel}\nTelefono: ${formData.phone}\nNote: ${formData.notes}`,
+        start: startDate.toISOString(),
+        end: endDate.toISOString(),
+      }
+
+      // Genera file .ics per Google Calendar, Apple Calendar, Outlook
+      const icsContent = `BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//SKALETTE BISTRO//Reservations//EN
 BEGIN:VEVENT
@@ -194,32 +230,37 @@ STATUS:CONFIRMED
 END:VEVENT
 END:VCALENDAR`
 
-    // Download file .ics
-    const blob = new Blob([icsContent], { type: 'text/calendar' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `prenotazione-skalette-${formData.date}.ics`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+      // Download file .ics
+      const blob = new Blob([icsContent], { type: 'text/calendar' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `prenotazione-skalette-${formData.date}.ics`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
 
-    setShowSuccess(true)
-    setTimeout(() => {
-      setShowSuccess(false)
-      setStep(1)
-      setFormData({
-        guests: '',
-        selectedTable: '',
-        date: '',
-        time: '',
-        firstName: '',
-        lastName: '',
-        phone: '',
+      setShowSuccess(true)
+      setTimeout(() => {
+        setShowSuccess(false)
+        setStep(1)
+        setFormData({
+          guests: '',
+          selectedTable: '',
+          date: '',
+          time: '',
+          firstName: '',
+          lastName: '',
+          phone: '',
+          serviceType: '',
         notes: '',
       })
     }, 5000)
+    } catch (error) {
+      console.error('Error submitting reservation:', error)
+      alert('Errore durante l\'invio della prenotazione. Riprova.')
+    }
   }
 
   const isStepValid = (currentStep: number) => {
@@ -229,7 +270,7 @@ END:VCALENDAR`
       case 2:
         return formData.selectedTable && formData.date && formData.time
       case 3:
-        return formData.firstName && formData.lastName && formData.phone
+        return formData.firstName && formData.lastName && formData.phone && formData.serviceType
       default:
         return false
     }
@@ -958,6 +999,26 @@ END:VCALENDAR`
 
                   <div className="mb-6">
                     <label className="block text-white/80 mb-2 font-medium">
+                      <FiClock className="inline mr-2" />
+                      Tipo di Servizio *
+                    </label>
+                    <select
+                      value={formData.serviceType}
+                      onChange={(e) =>
+                        setFormData({ ...formData, serviceType: e.target.value })
+                      }
+                      className="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-xl focus:outline-none focus:border-primary-500 transition-colors"
+                      required
+                    >
+                      <option value="">Seleziona tipo di servizio</option>
+                      <option value="pranzo">Pranzo (2 ore)</option>
+                      <option value="aperitivo">Aperitivo (1.5 ore)</option>
+                      <option value="cena">Cena (2 ore)</option>
+                    </select>
+                  </div>
+
+                  <div className="mb-6">
+                    <label className="block text-white/80 mb-2 font-medium">
                       <FiMessageSquare className="inline mr-2" />
                       Note (Opzionale)
                     </label>
@@ -980,6 +1041,7 @@ END:VCALENDAR`
                       <div><strong>Tavolo:</strong> {formData.selectedTable}</div>
                       <div><strong>Data:</strong> {formData.date}</div>
                       <div><strong>Orario:</strong> {formData.time}</div>
+                      <div><strong>Servizio:</strong> {formData.serviceType === 'pranzo' ? 'Pranzo (2h)' : formData.serviceType === 'aperitivo' ? 'Aperitivo (1.5h)' : formData.serviceType === 'cena' ? 'Cena (2h)' : ''}</div>
                     </div>
                   </div>
 
