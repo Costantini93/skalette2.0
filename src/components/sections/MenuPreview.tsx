@@ -159,13 +159,15 @@ export default function MenuPreview() {
               whileHover={{ y: -10 }}
               className="glass-effect rounded-2xl overflow-hidden hover:shadow-glow transition-all duration-300 group"
             >
-              <div className="relative h-40 sm:h-48 overflow-hidden">
-                <div
-                  className="absolute inset-0 bg-cover bg-center transform group-hover:scale-110 transition-transform duration-500"
-                  style={{ backgroundImage: `url(${item.image})` }}
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-dark-950 to-transparent" />
-              </div>
+              {item.image && (
+                <div className="relative h-40 sm:h-48 overflow-hidden">
+                  <div
+                    className="absolute inset-0 bg-cover bg-center transform group-hover:scale-110 transition-transform duration-500"
+                    style={{ backgroundImage: `url(${item.image})` }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-dark-950 to-transparent" />
+                </div>
+              )}
               <div className="p-6">
                 <div className="flex justify-between items-start mb-2">
                   <h3 className="text-xl font-bold text-white">{item.name}</h3>
