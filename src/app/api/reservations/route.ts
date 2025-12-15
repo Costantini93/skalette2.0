@@ -4,6 +4,12 @@ import path from 'path'
 
 const RESERVATIONS_FILE = path.join(process.cwd(), 'data', 'reservations.json')
 
+interface BlockedSlot {
+  date: string
+  time: string
+  tableId: string
+}
+
 interface Reservation {
   id: string
   date: string
@@ -206,7 +212,7 @@ export async function PUT(request: Request) {
       }
 
       // Filtra via i slot bloccati
-      availabilityData.blockedSlots = availabilityData.blockedSlots.filter(slot => {
+      availabilityData.blockedSlots = availabilityData.blockedSlots.filter((slot: BlockedSlot) => {
         return !slotsToRemove.some(toRemove => 
           toRemove.date === slot.date && 
           toRemove.time === slot.time && 
