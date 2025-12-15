@@ -6,6 +6,14 @@ import { useInView } from 'react-intersection-observer'
 import { FiFilter } from 'react-icons/fi'
 import MagneticButton from '../ui/MagneticButton'
 
+interface MenuItem {
+  name: string
+  description: string
+  price: string
+  rating: number
+  image?: string
+}
+
 export default function MenuPreview() {
   const [ref, inView] = useInView({
     triggerOnce: true,
@@ -16,7 +24,7 @@ export default function MenuPreview() {
 
   const categories = ['Cucina', 'Gastronomia', 'Colazione', 'Caffetteria', 'Vini', 'Bollicine', 'Birre', 'Dolci']
 
-  const menuItems = {
+  const menuItems: Record<string, MenuItem[]> = {
     Cucina: [
       { name: 'Tagliere di Salumi e Formaggi', description: 'Con giardiniera della casa e mostarda', price: '25€', rating: 4.9, image: '/images/Salmone.PNG' },
       { name: 'Pata Negra de Bellota 100%', description: 'Con pan y tomate', price: '20€', rating: 5.0, image: '/images/garnish.PNG' },
